@@ -95,7 +95,12 @@ class HiggsfieldAvatarNode:
     def _build_headers(self, api_key):
         headers = {"Content-Type": "application/json"}
         if ":" in api_key:
-            headers["Authorization"] = f"Key {api_key}"
+            key_id, key_secret = api_key.split(":", 1)
+            headers["hf-api-key"] = key_id
+            headers["hf-secret"] = key_secret
+        elif len(api_key) == 64:
+            headers["hf-api-key"] = api_key[:32]
+            headers["hf-secret"] = api_key[32:]
         else:
             headers["hf-api-key"] = api_key
         return headers
