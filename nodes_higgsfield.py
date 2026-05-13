@@ -41,11 +41,10 @@ class HiggsfieldAvatarNode:
     CATEGORY = "AvatarCreator"
 
     def _upload_file(self, data_bytes, filename, content_type):
-        """Upload file to a public host, trying multiple services as fallbacks."""
         services = [
-            ("file.io", self._upload_fileio),
-            ("0x0.st", self._upload_0x0),
-            ("transfer.sh", self._upload_transfersh),
+            ("catbox", self._upload_catbox),
+            ("uguu", self._upload_uguu),
+            ("gofile", self._upload_gofile),
         ]
         for name, fn in services:
             try:
@@ -57,36 +56,41 @@ class HiggsfieldAvatarNode:
                 print(f"[Higgsfield] {name} failed: {e}")
         raise RuntimeError("All file upload services failed")
 
-    def _upload_fileio(self, data_bytes, filename, content_type):
+    def _upload_catbox(self, data_bytes, filename, content_type):
         resp = requests.post(
-            "https://file.io/?expires=1d",
+            "https://litterbox.catbox.moe/resources/internals/api.php",
+            data={"reqtype": "fileupload", "time": "24h"},
+            files={"fileToUpload": (filename, data_bytes, content_type)},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        url = resp.text.strip()
+        if not url.startswith("http"):
+            raise RuntimeError(f"Unexpected response: {url}")
+        return url
+
+    def _upload_uguu(self, data_bytes, filename, content_type):
+        resp = requests.post(
+            "https://uguu.se/upload",
+            files={"files[]": (filename, data_bytes, content_type)},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["files"][0]["url"]
+
+    def _upload_gofile(self, data_bytes, filename, content_type):
+        server_resp = requests.get("https://api.gofile.io/servers", timeout=30)
+        server_resp.raise_for_status()
+        server = server_resp.json()["data"]["servers"][0]["name"]
+        resp = requests.post(
+            f"https://{server}.gofile.io/uploadFile",
             files={"file": (filename, data_bytes, content_type)},
             timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
-        if not data.get("success"):
-            raise RuntimeError(f"file.io error: {data}")
-        return data["link"]
-
-    def _upload_0x0(self, data_bytes, filename, content_type):
-        resp = requests.post(
-            "https://0x0.st",
-            files={"-": (filename, data_bytes, content_type)},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.text.strip()
-
-    def _upload_transfersh(self, data_bytes, filename, content_type):
-        resp = requests.put(
-            f"https://transfer.sh/{filename}",
-            data=data_bytes,
-            headers={"Content-Type": content_type, "Max-Days": "1"},
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.text.strip()
+        return data["data"]["downloadPage"]
 
     def generate_avatar(self, image, audio_path, api_key="",
                         prompt="Professional presenter, looking directly at camera, natural movements",
@@ -102,7 +106,6 @@ class HiggsfieldAvatarNode:
             if not audio_path or not os.path.isfile(audio_path):
                 raise ValueError(f"Audio file not found: '{audio_path}'")
 
-            # ── Convert image tensor → JPEG bytes ────────────────────────────
             print("[Higgsfield] Converting image...")
             img_np = (image[0].cpu().numpy() * 255).astype(np.uint8)
             img_pil = Image.fromarray(img_np)
@@ -111,16 +114,13 @@ class HiggsfieldAvatarNode:
             image_bytes = buf.getvalue()
             print(f"[Higgsfield] Image size: {len(image_bytes)} bytes")
 
-            # ── Read WAV audio ────────────────────────────────────────────────
             with open(audio_path, "rb") as f:
                 audio_bytes = f.read()
             print(f"[Higgsfield] Audio size: {len(audio_bytes)} bytes")
 
-            # ── Upload files to public host ───────────────────────────────────
             image_url = self._upload_file(image_bytes, "expert.jpg", "image/jpeg")
             audio_url = self._upload_file(audio_bytes, "voice.wav", "audio/wav")
 
-            # ── Submit generation ─────────────────────────────────────────────
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -153,7 +153,6 @@ class HiggsfieldAvatarNode:
             )
             print(f"[Higgsfield] Generation ID: {request_id}")
 
-            # ── Poll until complete ───────────────────────────────────────────
             for attempt in range(MAX_POLLS):
                 time.sleep(POLL_INTERVAL)
                 poll = requests.get(
@@ -161,7 +160,7 @@ class HiggsfieldAvatarNode:
                     headers={"Authorization": f"Bearer {api_key}"},
                     timeout=30,
                 )
-                print(f"[Higgsfield] Poll {attempt+1}: {poll.status_code} — {poll.text[:200]}")
+                print(f"[Higgsfield] Poll {attempt+1}: {poll.status_code} - {poll.text[:200]}")
                 poll.raise_for_status()
                 data = poll.json()
                 status = str(data.get("status", "")).lower()
