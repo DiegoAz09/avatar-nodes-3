@@ -92,6 +92,17 @@ class HiggsfieldAvatarNode:
         data = resp.json()
         return data["data"]["downloadPage"]
 
+    def _build_headers(self, api_key):
+        # Higgsfield v2: Authorization: Key KEY_ID:KEY_SECRET
+        # Higgsfield v1: hf-api-key header
+        # Try v2 format if key contains colon, else fall back to v1 header
+        headers = {"Content-Type": "application/json"}
+        if ":" in api_key:
+            headers["Authorization"] = f"Key {api_key}"
+        else:
+            headers["hf-api-key"] = api_key
+        return headers
+
     def generate_avatar(self, image, audio_path, api_key="",
                         prompt="Professional presenter, looking directly at camera, natural movements",
                         quality="mid", duration=10):
@@ -121,10 +132,7 @@ class HiggsfieldAvatarNode:
             image_url = self._upload_file(image_bytes, "expert.jpg", "image/jpeg")
             audio_url = self._upload_file(audio_bytes, "voice.wav", "audio/wav")
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
+            headers = self._build_headers(api_key)
             payload = {
                 "input_image": image_url,
                 "input_audio": audio_url,
@@ -133,6 +141,7 @@ class HiggsfieldAvatarNode:
                 "duration": int(duration),
             }
             print(f"[Higgsfield] Submitting to {BASE_URL}/v1/speak/higgsfield ...")
+            print(f"[Higgsfield] Headers (keys): {list(headers.keys())}")
             print(f"[Higgsfield] Payload: {payload}")
 
             resp = requests.post(
@@ -147,27 +156,30 @@ class HiggsfieldAvatarNode:
             result = resp.json()
 
             request_id = (
-                result.get("id")
-                or result.get("request_id")
+                result.get("request_id")
+                or result.get("id")
                 or result.get("generation_id")
             )
-            print(f"[Higgsfield] Generation ID: {request_id}")
+            print(f"[Higgsfield] Request ID: {request_id}")
 
+            # Poll /requests/{request_id}/status
             for attempt in range(MAX_POLLS):
                 time.sleep(POLL_INTERVAL)
                 poll = requests.get(
-                    f"{BASE_URL}/v1/generations/{request_id}",
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    f"{BASE_URL}/requests/{request_id}/status",
+                    headers=headers,
                     timeout=30,
                 )
-                print(f"[Higgsfield] Poll {attempt+1}: {poll.status_code} - {poll.text[:200]}")
+                print(f"[Higgsfield] Poll {attempt+1}: {poll.status_code} - {poll.text[:300]}")
                 poll.raise_for_status()
                 data = poll.json()
                 status = str(data.get("status", "")).lower()
 
                 if status in ("completed", "done", "succeeded", "success"):
+                    # v2 SDK returns video.url
                     video_url = (
-                        data.get("video_url")
+                        (data.get("video") or {}).get("url")
+                        or data.get("video_url")
                         or data.get("output_url")
                         or data.get("url")
                         or (data.get("result") or {}).get("url")
@@ -175,7 +187,7 @@ class HiggsfieldAvatarNode:
                     print(f"[Higgsfield] Done! Video URL: {video_url}")
                     return (video_url,)
 
-                if status in ("failed", "error", "cancelled"):
+                if status in ("failed", "error", "cancelled", "nsfw"):
                     raise RuntimeError(f"Higgsfield generation failed: {data}")
 
             raise TimeoutError("Higgsfield generation did not complete within 10 minutes.")
@@ -188,3 +200,4 @@ class HiggsfieldAvatarNode:
 
 NODE_CLASS_MAPPINGS = {"HiggsfieldAvatarNode": HiggsfieldAvatarNode}
 NODE_DISPLAY_NAME_MAPPINGS = {"HiggsfieldAvatarNode": "Higgsfield Avatar"}
+
