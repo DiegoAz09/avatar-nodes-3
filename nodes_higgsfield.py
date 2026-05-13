@@ -136,11 +136,13 @@ class HiggsfieldAvatarNode:
 
             headers = self._build_headers(api_key)
             payload = {
-                "input_image": image_url,
-                "input_audio": audio_url,
-                "prompt": prompt,
-                "quality": quality,
-                "duration": int(duration),
+                "params": {
+                    "input_image": image_url,
+                    "input_audio": audio_url,
+                    "prompt": prompt,
+                    "quality": quality,
+                    "duration": int(duration),
+                }
             }
             print(f"[Higgsfield] Submitting to {BASE_URL}/v1/speak/higgsfield ...")
             print(f"[Higgsfield] Headers (keys): {list(headers.keys())}")
