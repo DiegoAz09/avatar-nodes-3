@@ -93,9 +93,6 @@ class HiggsfieldAvatarNode:
         return data["data"]["downloadPage"]
 
     def _build_headers(self, api_key):
-        # Higgsfield v2: Authorization: Key KEY_ID:KEY_SECRET
-        # Higgsfield v1: hf-api-key header
-        # Try v2 format if key contains colon, else fall back to v1 header
         headers = {"Content-Type": "application/json"}
         if ":" in api_key:
             headers["Authorization"] = f"Key {api_key}"
@@ -151,9 +148,11 @@ class HiggsfieldAvatarNode:
                 timeout=60,
             )
             print(f"[Higgsfield] Response status: {resp.status_code}")
-           if not resp.ok:
-               raise RuntimeError(f"Higgsfield API error {resp.status_code}: {resp.text[:1000]}")
+            print(f"[Higgsfield] Response body: {resp.text[:1000]}")
+            if not resp.ok:
+                raise RuntimeError(f"Higgsfield API error {resp.status_code}: {resp.text[:1000]}")
             result = resp.json()
+
             request_id = (
                 result.get("request_id")
                 or result.get("id")
@@ -161,7 +160,6 @@ class HiggsfieldAvatarNode:
             )
             print(f"[Higgsfield] Request ID: {request_id}")
 
-            # Poll /requests/{request_id}/status
             for attempt in range(MAX_POLLS):
                 time.sleep(POLL_INTERVAL)
                 poll = requests.get(
@@ -175,7 +173,6 @@ class HiggsfieldAvatarNode:
                 status = str(data.get("status", "")).lower()
 
                 if status in ("completed", "done", "succeeded", "success"):
-                    # v2 SDK returns video.url
                     video_url = (
                         (data.get("video") or {}).get("url")
                         or data.get("video_url")
@@ -199,4 +196,3 @@ class HiggsfieldAvatarNode:
 
 NODE_CLASS_MAPPINGS = {"HiggsfieldAvatarNode": HiggsfieldAvatarNode}
 NODE_DISPLAY_NAME_MAPPINGS = {"HiggsfieldAvatarNode": "Higgsfield Avatar"}
-
